@@ -44,6 +44,7 @@ ament_target_dependencies(${PROJECT_NAME}
 	rclcpp
 	rviz_marker_tools
 	visualization_msgs
+	bio_ik
 )
 target_include_directories(${PROJECT_NAME}
 	PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>

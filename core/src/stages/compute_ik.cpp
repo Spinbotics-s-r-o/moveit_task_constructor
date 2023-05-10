@@ -42,6 +42,8 @@
 #include <moveit/robot_state/conversions.h>
 #include <moveit/robot_state/robot_state.h>
 
+#include <bio_ik/goal_types.hpp>
+
 #include <Eigen/Geometry>
 #if __has_include(<tf2_eigen/tf2_eigen.hpp>)
 #include <tf2_eigen/tf2_eigen.hpp>
@@ -52,6 +54,41 @@
 #include <functional>
 #include <iterator>
 #include <rclcpp/logging.hpp>
+
+namespace bio_ik {
+
+class AvoidPreviousSolutionGoal : public Goal {
+	std::vector<double> previous_solution_;
+	double problematic_distance_;
+public:
+	AvoidPreviousSolutionGoal(const std::vector<double> &previous_solution, double problematic_distance, double weight = 1.0, bool secondary = true) {
+		weight_ = weight;
+		secondary_ = secondary;
+		previous_solution_ = previous_solution;
+		problematic_distance_ = problematic_distance;
+	}
+	virtual double evaluate(const GoalContext& context) const {
+		double sum = 0.0;
+		for (size_t i = 0; i < context.getProblemVariableCount(); i++) {
+//      size_t ivar = context.getProblemVariableIndex(i);
+			double d = context.getProblemVariablePosition(i) - previous_solution_[i];
+			d = d - floor(d/(M_PI*2) + 0.5)*(M_PI*2);
+			sum += d * d;
+		}
+		double closeness = std::max(0.0, problematic_distance_ - sqrt(sum))/problematic_distance_;
+		if (log) {
+			std::ostringstream ss;
+			ss << closeness << ": ";
+			for (size_t i = 0; i < context.getProblemVariableCount(); i++) {
+				ss << context.getProblemVariablePosition(i) << "/" << previous_solution_[i] << " ";
+			}
+			RCLCPP_INFO_STREAM(rclcpp::get_logger("AvoidPreviousSolutionGoal"), ss.str());
+		}
+		return closeness*closeness;
+	}
+};
+
+}
 
 namespace moveit {
 namespace task_constructor {
@@ -69,6 +106,9 @@ ComputeIK::ComputeIK(const std::string& name, Stage::pointer&& child) : WrapperB
 	p.declare<double>("min_solution_distance", 0.1,
 	                  "minimum distance between seperate IK solutions for the same target");
 
+	p.declare<std::vector<double>>("timeouts", std::vector<double>(), "multiple timeouts for different numbers of solutions (must be set along with timeout_counts)");
+	p.declare<std::vector<uint32_t>>("timeout_counts", std::vector<uint32_t>(), "counts of solutions per timeout defined in 'timeouts' parameter. Must be in ascending order");
+	p.declare<double>("previous_solutions_avoidance_weight", 1.0, "how much IK should avoid solutions that have been previously tested (implemented only for BioIK)");
 	// ik_frame and target_pose are read from the interface
 	p.declare<geometry_msgs::msg::PoseStamped>("ik_frame", "frame to be moved towards goal pose");
 	p.declare<geometry_msgs::msg::PoseStamped>("target_pose", "goal pose for ik frame");
@@ -361,14 +401,22 @@ void ComputeIK::compute() {
 	double min_solution_distance = props.get<double>("min_solution_distance");
 
 	IKSolutions ik_solutions;
+	int valid_solutions_count = 0;
 	auto is_valid = [scene, ignore_collisions, min_solution_distance,
-	                 &ik_solutions](moveit::core::RobotState* state, const moveit::core::JointModelGroup* jmg,
+	                 &ik_solutions, &valid_solutions_count](moveit::core::RobotState* state, const moveit::core::JointModelGroup* jmg,
 	                                const double* joint_positions) {
-		for (const auto& sol : ik_solutions) {
-			if (jmg->distance(joint_positions, sol.joint_positions.data()) < min_solution_distance)
+		for (auto &sol : ik_solutions) {
+			if (!sol.feasible)
+				continue;
+			if (jmg->distance(joint_positions, sol.joint_positions.data()) < min_solution_distance) {
+				const Eigen::Map<const Eigen::RowVectorXd> vec(joint_positions, jmg->getActiveVariableCount());
+				const Eigen::Map<const Eigen::RowVectorXd> prev(sol.joint_positions.data(), jmg->getActiveVariableCount());
+				RCLCPP_INFO_STREAM(LOGGER, vec << " too similar to previous " << prev << " (" << valid_solutions_count << "/" << ik_solutions.size() << ")");
 				return false;  // too close to already found solution
+			}
 		}
 		state->setJointGroupPositions(jmg, joint_positions);
+
 		ik_solutions.emplace_back();
 		auto& solution{ ik_solutions.back() };
 		state->copyJointGroupPositions(jmg, solution.joint_positions);
@@ -381,25 +429,61 @@ void ComputeIK::compute() {
 		if (!res.contacts.empty()) {
 			solution.contact = res.contacts.begin()->second.front();
 		}
+
+		if (!solution.feasible) {
+			const Eigen::Map<const Eigen::RowVectorXd> vec(joint_positions, jmg->getActiveVariableCount());
+			RCLCPP_INFO_STREAM(LOGGER, vec << " in collision (" << valid_solutions_count << "/" << ik_solutions.size() << ")");
+		}
+		else {
+			valid_solutions_count++;
+		}
 		return solution.feasible;
 	};
 
-	uint32_t max_ik_solutions = props.get<uint32_t>("max_ik_solutions");
 	bool tried_current_state_as_seed = false;
 
-	double remaining_time = timeout();
+	std::vector<double> timeouts = props.get<std::vector<double>>("timeouts");
+	std::vector<uint32_t> timeout_counts = props.get<std::vector<uint32_t>>("timeout_counts");
+	assert(timeouts.size() == timeout_counts.size());
+	uint32_t max_ik_solutions = props.get<uint32_t>("max_ik_solutions");
+	double single_timeout = timeout();
+	if (timeout_counts.empty() || timeout_counts[0] != 0) {
+		timeout_counts.insert(timeout_counts.begin(), 0);
+		timeouts.insert(timeouts.begin(), single_timeout);
+	}
+	if (timeout_counts.back() < max_ik_solutions) {
+		timeout_counts.push_back(max_ik_solutions);
+		timeouts.push_back(0.0);
+	}
+	for (int i = 1; i < timeout_counts.size(); i++)
+		assert(timeout_counts[i-1] < timeout_counts[i]);  // maybe also && timeouts[i-1] >= timeouts[i]);
+
+	double remaining_time = timeouts[0];
+	int next_timeout_i = 1;
 	auto start_time = std::chrono::steady_clock::now();
-	while (ik_solutions.size() < max_ik_solutions && remaining_time > 0) {
+	bio_ik::BioIKKinematicsQueryOptions options;
+	double previous_solutions_avoidance_weight = max_ik_solutions = props.get<double>("previous_solutions_avoidance_weight");
+	while (remaining_time > 0) {
 		if (tried_current_state_as_seed)
 			sandbox_state.setToRandomPositions(jmg);
 		tried_current_state_as_seed = true;
 
 		size_t previous = ik_solutions.size();
-		bool succeeded = sandbox_state.setFromIK(jmg, target_pose, link->getName(), remaining_time, is_valid);
+		while (options.goals.size() < previous) {
+			options.goals.push_back(
+					std::make_unique<bio_ik::AvoidPreviousSolutionGoal>(ik_solutions[options.goals.size()].joint_positions, min_solution_distance*2, previous_solutions_avoidance_weight, true));
+		}
+		bool succeeded = sandbox_state.setFromIK(jmg, target_pose, link->getName(), remaining_time, is_valid, options);
 
 		auto now = std::chrono::steady_clock::now();
 		remaining_time -= std::chrono::duration<double>(now - start_time).count();
 		start_time = now;
+		while (next_timeout_i < timeouts.size() && valid_solutions_count >= timeout_counts[next_timeout_i]) {
+			remaining_time += timeouts[next_timeout_i] - timeouts[next_timeout_i - 1];
+			next_timeout_i++;
+		}
+    RCLCPP_INFO(LOGGER, "remaining time: %lf, valid solutions: %d, current_timeout: %lf (%d)",
+                 remaining_time, valid_solutions_count, timeouts[next_timeout_i-1], (int)timeout_counts[next_timeout_i-1]);
 
 		// for all new solutions (successes and failures)
 		for (size_t i = previous; i != ik_solutions.size(); ++i) {
@@ -432,11 +516,11 @@ void ComputeIK::compute() {
 			spawn(std::move(state), std::move(solution));
 		}
 
-		// TODO: magic constant should be a property instead ("current_seed_only", or equivalent)
-		// Yeah, you are right, these are two different semantic concepts:
-		// One could also have multiple IK solutions derived from the same seed
-		if (!succeeded && max_ik_solutions == 1)
-			break;  // first and only attempt failed
+//		// TODO: magic constant should be a property instead ("current_seed_only", or equivalent)
+//		// Yeah, you are right, these are two different semantic concepts:
+//		// One could also have multiple IK solutions derived from the same seed
+//		if (!succeeded && max_ik_solutions == 1)
+//			break;  // first and only attempt failed
 	}
 
 	if (ik_solutions.empty()) {  // failed to find any solution

@@ -146,28 +146,28 @@ void GeneratePlacePose::compute() {
 	};
 
 	uint z_flips = props.get<bool>("allow_z_flip") ? 1 : 0;
-	if (object->getShapes().size() == 1) {
-		switch (object->getShapes()[0]->type) {
-			case shapes::CYLINDER:
-				spawner(target_pose, z_flips);
-				return;
-
-			case shapes::BOX: {  // consider 180/90 degree rotations about z axis
-				const double* dims = static_cast<const shapes::Box&>(*object->getShapes()[0]).size;
-				spawner(target_pose, z_flips, (std::abs(dims[0] - dims[1]) < 1e-5) ? 4 : 2);
-				return;
-			}
-			case shapes::SPHERE:  // keep original orientation and rotate about world's z
-				target_pose.linear() = orig_object_pose.linear();
-				spawner(target_pose, z_flips);
-				return;
-			default:
-				break;
-		}
-	}
+//	if (object->getShapes().size() == 1) {
+//		switch (object->getShapes()[0]->type) {
+//			case shapes::CYLINDER:
+//				spawner(target_pose, z_flips);
+//				return;
+//
+//			case shapes::BOX: {  // consider 180/90 degree rotations about z axis
+//				const double* dims = static_cast<const shapes::Box&>(*object->getShapes()[0]).size;
+//				spawner(target_pose, z_flips, (std::abs(dims[0] - dims[1]) < 1e-5) ? 4 : 2);
+//				return;
+//			}
+//			case shapes::SPHERE:  // keep original orientation and rotate about world's z
+//				target_pose.linear() = orig_object_pose.linear();
+//				spawner(target_pose, z_flips);
+//				return;
+//			default:
+//				break;
+//		}
+//	}
 
 	// any other case: only try given target pose
-	spawner(target_pose, 1, 1);
+	spawner(target_pose, z_flips, 1);
 }
 }  // namespace stages
 }  // namespace task_constructor
