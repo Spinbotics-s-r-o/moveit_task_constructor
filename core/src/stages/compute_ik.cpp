@@ -70,12 +70,12 @@ public:
 	virtual double evaluate(const GoalContext& context) const {
 		double sum = 0.0;
 		for (size_t i = 0; i < context.getProblemVariableCount(); i++) {
-//      size_t ivar = context.getProblemVariableIndex(i);
 			double d = context.getProblemVariablePosition(i) - previous_solution_[i];
 			d = d - floor(d/(M_PI*2) + 0.5)*(M_PI*2);
 			sum += d * d;
 		}
 		double closeness = std::max(0.0, problematic_distance_ - sqrt(sum))/problematic_distance_;
+#ifdef BIO_IK_DEBUG_LOGGING
 		if (log) {
 			std::ostringstream ss;
 			ss << closeness << ": ";
@@ -84,6 +84,7 @@ public:
 			}
 			RCLCPP_INFO_STREAM(rclcpp::get_logger("AvoidPreviousSolutionGoal"), ss.str());
 		}
+#endif
 		return closeness*closeness;
 	}
 };
