@@ -54,6 +54,11 @@ static const rclcpp::Logger LOGGER = rclcpp::get_logger("Connect");
 Connect::Connect(const std::string& name, const GroupPlannerVector& planners) : Connecting(name), planner_(planners) {
 	setTimeout(1.0);
 	setCostTerm(std::make_unique<cost::PathLength>());
+	/*setCostTerm(std::make_unique<cost::Clearance>(false,	// with_world (default true)
+												  true,	// cumulative (default false)
+												  "group",	// group_property (default "group")
+												  cost::Clearance::Mode::TRAJECTORY	// mode (default cost::Clearance::Mode::AUTO)
+												  ));*/
 
 	auto& p = properties();
 	p.declare<MergeMode>("merge_mode", WAYPOINTS, "merge mode");

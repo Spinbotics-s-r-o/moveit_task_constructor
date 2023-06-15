@@ -48,7 +48,12 @@ namespace stages {
 static const rclcpp::Logger LOGGER = rclcpp::get_logger("GeneratePose");
 
 GeneratePose::GeneratePose(const std::string& name) : MonitoringGenerator(name) {
-	setCostTerm(std::make_unique<cost::Constant>(0.0));
+	//setCostTerm(std::make_unique<cost::Constant>(0.0));
+	setCostTerm(std::make_unique<cost::Clearance>(false,	// with_world (default true)
+												  true,	// cumulative (default false)
+												  "group",	// group_property (default "group")
+												  cost::Clearance::Mode::AUTO	// mode (default cost::Clearance::Mode::AUTO)
+												  ));
 
 	auto& p = properties();
 	p.declare<geometry_msgs::msg::PoseStamped>("pose", "target pose to pass on in spawned states");
