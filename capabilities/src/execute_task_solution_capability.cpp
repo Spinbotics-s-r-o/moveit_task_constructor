@@ -109,20 +109,24 @@ void ExecuteTaskSolutionCapability::goalCallback(
 		return;
 	}
 
-	plan_execution::ExecutableMotionPlan plan;
-	if (!constructMotionPlan(goal->solution, plan))
-		result->error_code.val = moveit_msgs::msg::MoveItErrorCodes::INVALID_MOTION_PLAN;
+	auto plan = std::make_shared<plan_execution::ExecutableMotionPlan>();
+	if (!constructMotionPlan(goal->solution, *plan)) {
+    result->error_code.val = moveit_msgs::msg::MoveItErrorCodes::INVALID_MOTION_PLAN;
+    goal_handle->abort(result);
+  }
 	else {
-		RCLCPP_INFO(LOGGER, "Executing TaskSolution");
-		result->error_code = context_->plan_execution_->executeAndMonitor(plan);
-	}
+    std::thread([=] {
+      RCLCPP_INFO(LOGGER, "Executing TaskSolution");
+      result->error_code = context_->plan_execution_->executeAndMonitor(*plan);
 
-	if (result->error_code.val == moveit_msgs::msg::MoveItErrorCodes::SUCCESS)
-		goal_handle->succeed(result);
-	else if (result->error_code.val == moveit_msgs::msg::MoveItErrorCodes::PREEMPTED && goal_handle->is_canceling())
-		goal_handle->canceled(result);
-	else
-		goal_handle->abort(result);
+      if (result->error_code.val == moveit_msgs::msg::MoveItErrorCodes::SUCCESS)
+        goal_handle->succeed(result);
+      else if (result->error_code.val == moveit_msgs::msg::MoveItErrorCodes::PREEMPTED && goal_handle->is_canceling())
+        goal_handle->canceled(result);
+      else
+        goal_handle->abort(result);
+    }).detach();
+	}
 }
 
 rclcpp_action::CancelResponse ExecuteTaskSolutionCapability::preemptCallback(

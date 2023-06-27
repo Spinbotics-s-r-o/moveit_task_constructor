@@ -463,7 +463,7 @@ void ComputeIK::compute() {
 	int next_timeout_i = 1;
 	auto start_time = std::chrono::steady_clock::now();
 	bio_ik::BioIKKinematicsQueryOptions options;
-	double previous_solutions_avoidance_weight = max_ik_solutions = props.get<double>("previous_solutions_avoidance_weight");
+	double previous_solutions_avoidance_weight = props.get<double>("previous_solutions_avoidance_weight");
 	while (remaining_time > 0) {
 		if (tried_current_state_as_seed)
 			sandbox_state.setToRandomPositions(jmg);
