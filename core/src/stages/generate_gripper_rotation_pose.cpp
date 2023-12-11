@@ -75,39 +75,11 @@ void GenerateGripperRotationPose::init(const core::RobotModelConstPtr& robot_mod
 	if (props.get<double>("angle_delta") == 0.)
 		errors.push_back(*this, "angle_delta must be non-zero");
 
-	// check availability of object
-	//props.get<std::string>("object");
-	// check availability of eef
-	/*const std::string& eef = props.get<std::string>("eef");
-	if (!robot_model->hasEndEffector(eef)) {
-		errors.push_back(*this, "unknown end effector: " + eef);
-		throw errors;
-	}
-
-	// check availability of eef pose
-	const moveit::core::JointModelGroup* jmg = robot_model->getEndEffector(eef);
-	moveit::core::RobotState test_state{ robot_model };
-	try {
-		applyPreGrasp(test_state, jmg, props.property("pregrasp"));
-	} catch (const moveit::Exception& e) {
-		errors.push_back(*this, std::string{ "invalid pregrasp: " } + e.what());
-	}*/
-
 	if (errors)
 		throw errors;
 }
 
 void GenerateGripperRotationPose::onNewSolution(const SolutionBase& s) {
-	/*planning_scene::PlanningSceneConstPtr scene = s.end()->scene();
-
-	const auto& props = properties();
-	const std::string& object = props.get<std::string>("object");
-	if (!scene->knowsFrameTransform(object)) {
-		const std::string msg = "object '" + object + "' not in scene";
-		spawn(InterfaceState{ scene }, SubTrajectory::failure(msg));
-		return;
-	}*/
-
 	upstream_solutions_.push(&s);
 }
 
@@ -118,19 +90,7 @@ void GenerateGripperRotationPose::compute() {
 
 	// set end effector pose
 	const auto& props = properties();
-	/*const std::string& eef = props.get<std::string>("eef");
-	const moveit::core::JointModelGroup* jmg = scene->getRobotModel()->getEndEffector(eef);
-
-	moveit::core::RobotState& robot_state = scene->getCurrentStateNonConst();
-	try {
-		applyPreGrasp(robot_state, jmg, props.property("pregrasp"));
-	} catch (const moveit::Exception& e) {
-		spawn(InterfaceState{ scene }, SubTrajectory::failure(std::string{ "invalid pregrasp: " } + e.what()));
-		return;
-	}*/
-
 	geometry_msgs::msg::PoseStamped target_pose_msg;
-	//target_pose_msg.header.frame_id = props.get<std::string>("object");
 	//target_pose_msg.header.frame_id = scene->getPlanningFrame();
 	//target_pose_msg.header.frame_id = "tcp";
 	target_pose_msg.header.frame_id = "base_link";
@@ -148,15 +108,8 @@ void GenerateGripperRotationPose::compute() {
 		q.setX(target_pose_msg.pose.orientation.x);
 		q.setY(target_pose_msg.pose.orientation.y);
 		q.setZ(target_pose_msg.pose.orientation.z);
-
-		//tf2::Vector3 axis(target_pose.pose.orientation.x, target_pose.pose.orientation.y, target_pose.pose.orientation.z);
-		//q.setRotation(axis, 0.0);
 		
 		tf2::Quaternion rot;
-		rot.setX(0);
-		rot.setY(0);
-		rot.setZ(0);
-		rot.setW(1.0);
 		rot.setRPY(0,0,current_angle);
 
 		q = rot*q;
@@ -167,10 +120,7 @@ void GenerateGripperRotationPose::compute() {
 		target_pose_msg.pose.orientation.w = q.getW();
 
 		InterfaceState state(scene);
-		//target_pose_msg.pose = tf2::toMsg(target_pose);
 		state.properties().set("target_pose", target_pose_msg);
-		//props.exposeTo(state.properties(), { "pregrasp", "grasp" });
-		//props.exposeTo(state.properties(), { "grasp" });
 
 		SubTrajectory trajectory;
 		trajectory.setCost(0.0);
