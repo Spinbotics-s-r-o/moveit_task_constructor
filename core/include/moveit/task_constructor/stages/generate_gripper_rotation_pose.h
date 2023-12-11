@@ -1,7 +1,7 @@
 /*********************************************************************
  * Software License Agreement (BSD License)
  *
- *  Copyright (c) 2020, Hamburg University
+ *  Copyright (c) 2017, Hamburg University
  *  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
@@ -14,7 +14,7 @@
  *     copyright notice, this list of conditions and the following
  *     disclaimer in the documentation and/or other materials provided
  *     with the distribution.
- *   * Neither the name of the copyright holder nor the names of its
+ *   * Neither the name of Bielefeld University nor the names of its
  *     contributors may be used to endorse or promote products derived
  *     from this software without specific prior written permission.
  *
@@ -32,23 +32,40 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  *********************************************************************/
 
-/* Author: Michael 'v4hn' Goerner
-   Desc:   collective include of primitive stages
+/* Authors: Michael Goerner
+   Desc:    Generator Stage for simple grasp poses
 */
 
 #pragma once
 
-#include "stages/compute_ik.h"
-#include "stages/connect.h"
-#include "stages/current_state.h"
-#include "stages/fix_collision_objects.h"
-#include "stages/fixed_cartesian_poses.h"
-#include "stages/fixed_state.h"
-#include "stages/generate_grasp_pose.h"
-#include "stages/generate_place_pose.h"
-#include "stages/generate_pose.h"
-#include "stages/modify_planning_scene.h"
-#include "stages/move_relative.h"
-#include "stages/move_to.h"
-#include "stages/predicate_filter.h"
-#include "stages/generate_gripper_rotation_pose.h"
+#include <moveit/task_constructor/stages/generate_pose.h>
+#include <rclcpp/publisher.hpp>
+#include <geometry_msgs/msg/pose_array.hpp>
+
+namespace moveit {
+namespace task_constructor {
+namespace stages {
+
+class GenerateGripperRotationPose : public GeneratePose
+{
+public:
+	GenerateGripperRotationPose(const std::string& name = "generate grasp pose");
+
+	void init(const core::RobotModelConstPtr& robot_model) override;
+	void compute() override;
+
+	void setEndEffector(const std::string& eef) { setProperty("eef", eef); }
+	void setObject(const std::string& object) { setProperty("object", object); }
+	void setAngleDelta(double delta) { setProperty("angle_delta", delta); }
+
+	void setPreGraspPose(const std::string& pregrasp) { properties().set("pregrasp", pregrasp); }
+	void setPreGraspPose(const moveit_msgs::msg::RobotState& pregrasp) { properties().set("pregrasp", pregrasp); }
+	void setGraspPose(const std::string& grasp) { properties().set("grasp", grasp); }
+	void setGraspPose(const moveit_msgs::msg::RobotState& grasp) { properties().set("grasp", grasp); }
+
+protected:
+	void onNewSolution(const SolutionBase& s) override;
+};
+}  // namespace stages
+}  // namespace task_constructor
+}  // namespace moveit

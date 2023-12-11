@@ -19,6 +19,8 @@ add_library(${PROJECT_NAME}_stages SHARED
 	${PROJECT_INCLUDE}/stages/simple_grasp.h
 	${PROJECT_INCLUDE}/stages/pick.h
 
+	${PROJECT_INCLUDE}/stages/generate_gripper_rotation_pose.h
+
 	modify_planning_scene.cpp
 	fix_collision_objects.cpp
 
@@ -38,6 +40,8 @@ add_library(${PROJECT_NAME}_stages SHARED
 
 	simple_grasp.cpp
 	pick.cpp
+
+	generate_gripper_rotation_pose.cpp
 )
 target_link_libraries(${PROJECT_NAME}_stages ${PROJECT_NAME})
 ament_target_dependencies(${PROJECT_NAME}_stages
