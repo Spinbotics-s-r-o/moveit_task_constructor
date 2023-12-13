@@ -63,6 +63,8 @@ public:
 	void setGraspPose(const std::string& grasp) { properties().set("grasp", grasp); }
 	void setGraspPose(const moveit_msgs::msg::RobotState& grasp) { properties().set("grasp", grasp); }
 
+	void setRotationsCount(unsigned int rotations_count) { properties().set("rotations_count", rotations_count); }
+
 protected:
 	void onNewSolution(const SolutionBase& s) override;
 };

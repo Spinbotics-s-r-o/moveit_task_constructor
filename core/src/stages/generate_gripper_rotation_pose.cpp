@@ -88,48 +88,34 @@ void GenerateGripperRotationPose::compute() {
 		return;
 	planning_scene::PlanningScenePtr scene = upstream_solutions_.pop()->end()->scene()->diff();
 
-	// set end effector pose
 	const auto& props = properties();
-	geometry_msgs::msg::PoseStamped target_pose_msg;
-	//target_pose_msg.header.frame_id = scene->getPlanningFrame();
-	//target_pose_msg.header.frame_id = "tcp";
-	target_pose_msg.header.frame_id = "base_link";
-	//target_pose_msg.pose = properties().get<geometry_msgs::msg::PoseStamped>("pose").pose;
+	double rotation_angular_step = props.get<double>("angle_delta");
+	unsigned int rotations_count = props.get<unsigned int>("rotations_count");
 
-	geometry_msgs::msg::PoseArray gen_poses_vis;
-	gen_poses_vis.header = target_pose_msg.header;
+	for(unsigned int i = 0; i < rotations_count; i++){
+		geometry_msgs::msg::PoseStamped target_pose = properties().get<geometry_msgs::msg::PoseStamped>("pose");
+		double current_angle = i*rotation_angular_step;
 
-	double current_angle = 0.0;
-	while (current_angle < 2. * M_PI && current_angle > -2. * M_PI) {
-		target_pose_msg.pose = properties().get<geometry_msgs::msg::PoseStamped>("pose").pose;
-		
-		tf2::Quaternion q;
-		q.setW(target_pose_msg.pose.orientation.w);
-		q.setX(target_pose_msg.pose.orientation.x);
-		q.setY(target_pose_msg.pose.orientation.y);
-		q.setZ(target_pose_msg.pose.orientation.z);
-		
+		tf2::Quaternion q(target_pose.pose.orientation.x, target_pose.pose.orientation.y, target_pose.pose.orientation.z, target_pose.pose.orientation.w);
+
 		tf2::Quaternion rot;
 		rot.setRPY(0,0,current_angle);
-
 		q = rot*q;
 
-		target_pose_msg.pose.orientation.x = q.getX();
-		target_pose_msg.pose.orientation.y = q.getY();
-		target_pose_msg.pose.orientation.z = q.getZ();
-		target_pose_msg.pose.orientation.w = q.getW();
+		target_pose.pose.orientation.x = q.getX();
+		target_pose.pose.orientation.y = q.getY();
+		target_pose.pose.orientation.z = q.getZ();
+		target_pose.pose.orientation.w = q.getW();
 
 		InterfaceState state(scene);
-		state.properties().set("target_pose", target_pose_msg);
+		state.properties().set("target_pose", target_pose);
 
 		SubTrajectory trajectory;
 		trajectory.setCost(0.0);
 		trajectory.setComment(std::to_string(current_angle));
 
-		current_angle += props.get<double>("angle_delta");
-
 		// add frame at target pose
-		rviz_marker_tools::appendFrame(trajectory.markers(), target_pose_msg, 0.1, "grasp frame");
+		rviz_marker_tools::appendFrame(trajectory.markers(), target_pose, 0.1, "grasp frame");
 
 		spawn(std::move(state), std::move(trajectory));
 	}
