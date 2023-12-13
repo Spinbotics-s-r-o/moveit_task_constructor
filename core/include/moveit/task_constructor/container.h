@@ -88,6 +88,7 @@ class SerialContainerPrivate;
 /** SerialContainer allows to sequentially chain a set of child stages */
 class SerialContainer : public ContainerBase
 {
+
 public:
 	PRIVATE_CLASS(SerialContainer)
 	SerialContainer(const std::string& name = "serial container");
@@ -99,6 +100,16 @@ protected:
 	void onNewSolution(const SolutionBase& s) override;
 
 	SerialContainer(SerialContainerPrivate* impl);
+};
+
+class SerialFilterContainer : public SerialContainer
+{
+	public:
+		SerialFilterContainer(const std::string& name = "serial filter container") : SerialContainer(name) {}
+
+	private:
+		std::vector<moveit::task_constructor::SolutionSequencePtr> solutions_accumulator;
+		void onNewSolution(const SolutionBase& s) override;
 };
 
 class ParallelContainerBasePrivate;

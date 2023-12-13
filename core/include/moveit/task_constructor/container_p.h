@@ -197,6 +197,7 @@ PIMPL_FUNCTIONS(ContainerBase)
 class SerialContainerPrivate : public ContainerBasePrivate
 {
 	friend class SerialContainer;
+	friend class SerialFilterContainer;
 
 public:
 	SerialContainerPrivate(SerialContainer* me, const std::string& name);
