@@ -100,7 +100,7 @@ void GenerateGripperRotationPose::compute() {
 
 		tf2::Quaternion rot;
 		rot.setRPY(0,0,current_angle);
-		q = rot*q;
+		q = q*rot;
 
 		target_pose.pose.orientation.x = q.getX();
 		target_pose.pose.orientation.y = q.getY();
