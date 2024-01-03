@@ -329,6 +329,14 @@ size_t ContainerBase::numChildren() const {
 	return pimpl()->children().size();
 }
 
+std::vector<Stage*> ContainerBase::getChildren() const {
+	std::vector<Stage*> stages;
+	for (const Stage::pointer& child : pimpl()->children()){
+		stages.push_back(child.get());
+	}
+	return stages;
+}
+
 Stage* ContainerBase::findChild(const std::string& name) const {
 	auto pos = name.find('/');
 	const std::string first = name.substr(0, pos);
