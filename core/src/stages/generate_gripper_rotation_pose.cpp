@@ -92,7 +92,7 @@ void GenerateGripperRotationPose::compute() {
 	double rotation_angular_step = props.get<double>("angle_delta");
 	unsigned int rotations_count = props.get<unsigned int>("rotations_count");
 
-	for(unsigned int i = 0; i < rotations_count; i++){
+	for(unsigned int i = 0; i < rotations_count+1; i++){
 		geometry_msgs::msg::PoseStamped target_pose = properties().get<geometry_msgs::msg::PoseStamped>("pose");
 		double current_angle = i*rotation_angular_step;
 
