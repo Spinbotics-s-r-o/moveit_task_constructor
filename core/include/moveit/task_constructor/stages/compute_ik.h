@@ -80,6 +80,7 @@ public:
 
 	void setEndEffector(const std::string& eef) { setProperty("eef", eef); }
 	void setGroup(const std::string& group) { setProperty("group", group); }
+  void setAllowSpinOverflow(const bool allow_spin_overflow) { setProperty("allow_spin_overflow", allow_spin_overflow); }
 
 	/// setters for IK frame
 	void setIKFrame(const geometry_msgs::msg::PoseStamped& pose) { setProperty("ik_frame", pose); }

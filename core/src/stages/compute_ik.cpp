@@ -107,6 +107,7 @@ ComputeIK::ComputeIK(const std::string& name, Stage::pointer&& child) : WrapperB
 	p.declare<double>("min_solution_distance", 0.1,
 	                  "minimum distance between seperate IK solutions for the same target");
 
+  p.declare<bool>("allow_spin_overflow", false, "IK solutions will go beyond <-180;180> degrees proximity around the current position if true");
 	p.declare<std::vector<double>>("timeouts", std::vector<double>(), "multiple timeouts for different numbers of solutions (must be set along with timeout_counts)");
 	p.declare<std::vector<uint32_t>>("timeout_counts", std::vector<uint32_t>(), "counts of solutions per timeout defined in 'timeouts' parameter. Must be in ascending order");
 	p.declare<double>("previous_solutions_avoidance_weight", 1.0, "how much IK should avoid solutions that have been previously tested (implemented only for BioIK)");
@@ -403,7 +404,40 @@ void ComputeIK::compute() {
 
 	IKSolutions ik_solutions;
 	int valid_solutions_count = 0;
-	auto is_valid = [scene, ignore_collisions, min_solution_distance,
+
+  // spin overflow
+  bool allow_spin_overflow = properties().get<bool>("allow_spin_overflow");
+  std::vector<double> angular_region_centers;
+  moveit::core::JointModel::Bounds variable_bounds;
+  if (!allow_spin_overflow) {
+    angular_region_centers.reserve(jmg->getVariableCount());
+    variable_bounds.reserve(jmg->getVariableCount());
+    auto joint_models = jmg->getJointModels();  // ik.solution uses all variables, not only active ones
+    const auto &state = scene->getCurrentState();
+    bool has_region_centers = false;
+    for (const auto &joint_model: joint_models) {
+      if (joint_model->getType() != moveit::core::JointModel::JointType::REVOLUTE) {
+        for (auto &var: joint_model->getVariableNames())
+          angular_region_centers.push_back(std::numeric_limits<double>::infinity());
+        continue;
+      }
+      for (auto &var: joint_model->getVariableNames()) {
+        auto bounds = joint_model->getVariableBounds(var);
+        variable_bounds.push_back(bounds);
+        if (bounds.position_bounded_ && (bounds.min_position_ > -1e9 || bounds.max_position_ < 1e9)) {
+          angular_region_centers.push_back(state.getVariablePosition(var));
+          has_region_centers = true;
+        } else
+          angular_region_centers.push_back(std::numeric_limits<double>::infinity());
+      }
+    }
+    if (!has_region_centers) {
+      angular_region_centers.clear();
+      variable_bounds.clear();
+    }
+  }
+
+  auto is_valid = [scene, ignore_collisions, min_solution_distance, &angular_region_centers, &variable_bounds,
 	                 &ik_solutions, &valid_solutions_count](moveit::core::RobotState* state, const moveit::core::JointModelGroup* jmg,
 	                                const double* joint_positions) {
 		for (auto &sol : ik_solutions) {
@@ -412,7 +446,7 @@ void ComputeIK::compute() {
 			if (jmg->distance(joint_positions, sol.joint_positions.data()) < min_solution_distance) {
 				const Eigen::Map<const Eigen::RowVectorXd> vec(joint_positions, jmg->getActiveVariableCount());
 				const Eigen::Map<const Eigen::RowVectorXd> prev(sol.joint_positions.data(), jmg->getActiveVariableCount());
-				RCLCPP_INFO_STREAM(LOGGER, vec << " too similar to previous " << prev << " (" << valid_solutions_count << "/" << ik_solutions.size() << ")");
+				// RCLCPP_INFO_STREAM(LOGGER, vec << " too similar to previous " << prev << " (" << valid_solutions_count << "/" << ik_solutions.size() << ")");
 				return false;  // too close to already found solution
 			}
 		}
@@ -420,7 +454,6 @@ void ComputeIK::compute() {
 
 		ik_solutions.emplace_back();
 		auto& solution{ ik_solutions.back() };
-		state->copyJointGroupPositions(jmg, solution.joint_positions);
 		collision_detection::CollisionRequest req;
 		collision_detection::CollisionResult res;
 		req.contacts = true;
@@ -431,12 +464,33 @@ void ComputeIK::compute() {
 			solution.contact = res.contacts.begin()->second.front();
 		}
 
+    state->copyJointGroupPositions(jmg, solution.joint_positions);
 		if (!solution.feasible) {
-			const Eigen::Map<const Eigen::RowVectorXd> vec(joint_positions, jmg->getActiveVariableCount());
-			RCLCPP_INFO_STREAM(LOGGER, vec << " in collision (" << valid_solutions_count << "/" << ik_solutions.size() << ")");
+			// const Eigen::Map<const Eigen::RowVectorXd> vec(joint_positions, jmg->getActiveVariableCount());
+			// RCLCPP_INFO_STREAM(LOGGER, vec << " in collision (" << valid_solutions_count << "/" << ik_solutions.size() << ")");
 		}
 		else {
-			valid_solutions_count++;
+      if (!angular_region_centers.empty()) {
+        size_t var_cnt = angular_region_centers.size();
+        for (size_t i = 0; i < var_cnt; i++) {
+          if (!std::isfinite(angular_region_centers[i]))
+            continue;
+          double &pos = solution.joint_positions[i];
+
+          RCLCPP_INFO(LOGGER, "IK position: %lf", pos);
+          pos -= round((pos - angular_region_centers[i])/(2*M_PI))*(2*M_PI);
+          const auto &bounds = variable_bounds[i];
+          if (bounds.position_bounded_) {
+            while (pos < bounds.min_position_ && (bounds.min_position_ - pos > pos + 2*M_PI - bounds.max_position_))
+              pos += 2*M_PI;
+            while (pos > bounds.max_position_ && (pos - bounds.max_position_ > bounds.min_position_ - (pos - 2*M_PI)))
+              pos -= 2*M_PI;
+            pos = std::max(bounds.min_position_, std::min(bounds.max_position_, pos));  // fix minor computation errors
+          }
+          RCLCPP_INFO(LOGGER, "Adjusted position: %lf", pos);
+        }
+      }
+      valid_solutions_count++;
 		}
 		return solution.feasible;
 	};
@@ -466,7 +520,7 @@ void ComputeIK::compute() {
 	double previous_solutions_avoidance_weight = props.get<double>("previous_solutions_avoidance_weight");
 	while (remaining_time > 0) {
 		if (tried_current_state_as_seed)
-			sandbox_state.setToRandomPositions(jmg);
+      sandbox_state.setToRandomPositions(jmg);
 		tried_current_state_as_seed = true;
 
 		size_t previous = ik_solutions.size();
