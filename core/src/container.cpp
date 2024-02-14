@@ -547,80 +547,6 @@ void SerialContainer::onNewSolution(const SolutionBase& current) {
 		impl->liftSolution(solution, solution->internalStart(), solution->internalEnd());
 }
 
-void SerialFilterContainer::onNewSolution(const SolutionBase& current) {
-	RCLCPP_INFO_STREAM(rclcpp::get_logger("SerialContainer"), "'" << this->name()
-	                                                               << "' received solution of child stage '"
-	                                                               << current.creator()->name() << "'");
-
-	//std::cout << boost::stacktrace::stacktrace();
-
-	// failures should never trigger this callback
-	assert(!current.isFailure());
-
-	auto impl = pimpl();
-	const Stage* creator = current.creator();
-	auto& children = impl->children();
-
-	// find number of stages before and after creator stage
-	size_t num_before = 0, num_after = 0;
-	for (auto it = children.begin(), end = children.end(); it != end; ++it, ++num_before)
-		if (&(**it) == creator)
-			break;
-	assert(num_before < children.size());  // creator should be one of our children
-	num_after = children.size() - 1 - num_before;
-
-	// find all incoming and outgoing solution paths originating from current solution
-	SolutionCollector<Interface::BACKWARD> incoming(num_before, current);
-	SolutionCollector<Interface::FORWARD> outgoing(num_after, current);
-
-	// collect (and sort) all solutions spanning from start to end of this container
-	ordered<SolutionSequencePtr> sorted;
-	for (auto& in : incoming.solutions) {
-		for (auto& out : outgoing.solutions) {
-			InterfaceState::Priority prio = in.second + InterfaceState::Priority(1u, current.cost()) + out.second;
-			assert(prio.enabled());
-			// found a complete solution path connecting start to end?
-			if (prio.depth() == children.size()) {
-				SolutionSequence::container_type solution;
-				solution.reserve(children.size());
-				// insert incoming solutions in reverse order
-				solution.insert(solution.end(), in.first.rbegin(), in.first.rend());
-				// insert current solution
-				solution.push_back(&current);
-				// insert outgoing solutions in normal order
-				solution.insert(solution.end(), out.first.begin(), out.first.end());
-				// store solution in sorted list
-				sorted.insert(std::make_shared<SolutionSequence>(std::move(solution), prio.cost(), this));
-			}
-			if (prio.depth() > 1) {
-				// update state priorities along the whole partial solution path
-				updateStatePrios<Interface::BACKWARD>(*current.start(), prio);
-				updateStatePrios<Interface::FORWARD>(*current.end(), prio);
-			}
-		}
-	}
-	// printChildrenInterfaces(*this->pimpl(), true, *current.creator());
-
-	// finally, store + announce new solutions to external interface, but only if there isn't previous solution with very similar cost
-	for (auto solution : sorted){
-		if(isnan(solution->cost()) || isinf(solution->cost())) continue;
-
-		bool similar_present = false;
-
-		for(auto solution_h : solutions_accumulator){
-			double cost_diff = abs(solution->cost() - solution_h->cost());
-			if(cost_diff < 0.1){
-				similar_present = true;
-			}
-		}
-
-		if(!similar_present){
-			impl->liftSolution(solution, solution->internalStart(), solution->internalEnd());
-			solutions_accumulator.push_back(solution);
-		}
-	}
-}
-
 SerialContainer::SerialContainer(SerialContainerPrivate* impl) : ContainerBase(impl) {}
 SerialContainer::SerialContainer(const std::string& name) : SerialContainer(new SerialContainerPrivate(this, name)) {}
 
@@ -1365,5 +1291,135 @@ void MergerPrivate::merge(const ChildSolutionList& sub_solutions,
 	}
 	spawner(std::move(t));
 }
+
+void SerialFilterContainer::compute() {
+	SerialContainer::compute();
+	if(!canCompute()) dumpSolutions();	// if everything is solved, dump top-N solutions to the upper level and store remaining solutions for debugging purposes
+}
+
+void SerialFilterContainer::dumpSolutions(){
+	sorted.sort();	// not sure if always needed, just to be sure...
+
+	// 1. We always want at least one solution, so always lift best solution (if there is at least one solution)
+	if(sorted.size()){
+		auto solution = *sorted.begin();
+		solution->setComment("the best solution with the lowest cost, propagated higher");
+		pimpl()->liftSolution(solution, solution->internalStart(), solution->internalEnd());
+		sorted.pop();
+	}
+
+	// 2. If more than one solution is desired, lift also 2nd, 3rd...an so on.
+	int64_t already_lifed_count = 2; // we work here with the second or higher solution
+	while(sorted.size() && already_lifed_count <= num_of_best_solutions_taken){
+		std::string suffix;
+		if(already_lifed_count == 2) suffix = "nd";
+		if(already_lifed_count == 3) suffix = "rd";
+		if(already_lifed_count > 3) suffix = "th";
+
+		auto solution = *sorted.begin();
+		solution->setComment(std::to_string(already_lifed_count) + suffix + " best solution, propagated higher");
+		pimpl()->liftSolution(solution, solution->internalStart(), solution->internalEnd());
+		sorted.erase(sorted.begin());
+
+		already_lifed_count++;
+	}
+
+	// 3. If there are any solutions left that have higher cost, store them for the debug purposes
+	// so they are visible in the Motion Planning Tasks in the RViz.
+	if(sorted.size()){
+		for (const auto& solution : sorted){
+			//solution->markAsFailure("marked as failure because there are better solutions"); // we could mark this solution as failure, but we would not be able to see its cost
+			solution->setComment("not used because there are better solutions");
+			//pimpl()->liftSolution(solution, solution->internalStart(), solution->internalEnd()); // note #1: we cannot lift solution because it would propagate it higher
+
+			// following code is taken from the 'ContainerBasePrivate::liftSolution' method
+			pimpl()->computeCost(*(solution->internalStart()), *(solution->internalEnd()), *solution);
+
+			// map internal to external states
+			auto find_or_create_external = [this](const InterfaceState* internal, bool& created) -> InterfaceState* {
+				auto it = pimpl()->internalToExternalMap().find(internal);
+				if (it != pimpl()->internalToExternalMap().end())
+					return const_cast<InterfaceState*>(it->second);
+
+				InterfaceState* external = &*(pimpl()->states_).insert(pimpl()->states_.end(), InterfaceState(*internal));
+				pimpl()->internalToExternalMap().insert(std::make_pair(internal, external));
+				created = true;
+				return external;
+			};
+			bool created_from = false;
+			bool created_to = false;
+			InterfaceState* external_from = find_or_create_external(solution->internalStart(), created_from);
+			InterfaceState* external_to = find_or_create_external(solution->internalEnd(), created_to);
+
+			pimpl()->storeSolution(solution, solution->internalStart(), solution->internalEnd());
+
+			// connect solution to start/end state
+			solution->setStartState(*external_from);
+			solution->setEndState(*external_to);
+
+			// note #2: this would propagate solution higher
+			// spawn created states in external interfaces
+			/*if (created_from)
+				pimpl()->prevEnds()->add(*external_from);
+			if (created_to)
+				pimpl()->nextStarts()->add(*external_to);*/
+		}
+	}
+
+	sorted.clear();
+}
+
+void SerialFilterContainer::onNewSolution(const SolutionBase& current) {
+	RCLCPP_DEBUG_STREAM(rclcpp::get_logger("SerialContainer"), "'" << this->name()
+	                                                               << "' received solution of child stage '"
+	                                                               << current.creator()->name() << "'");
+
+	// failures should never trigger this callback
+	assert(!current.isFailure());
+
+	auto impl = pimpl();
+	const Stage* creator = current.creator();
+	auto& children = impl->children();
+
+	// find number of stages before and after creator stage
+	size_t num_before = 0, num_after = 0;
+	for (auto it = children.begin(), end = children.end(); it != end; ++it, ++num_before)
+		if (&(**it) == creator)
+			break;
+	assert(num_before < children.size());  // creator should be one of our children
+	num_after = children.size() - 1 - num_before;
+
+	// find all incoming and outgoing solution paths originating from current solution
+	SolutionCollector<Interface::BACKWARD> incoming(num_before, current);
+	SolutionCollector<Interface::FORWARD> outgoing(num_after, current);
+
+	// collect (and sort) all solutions spanning from start to end of this container
+	for (auto& in : incoming.solutions) {
+		for (auto& out : outgoing.solutions) {
+			InterfaceState::Priority prio = in.second + InterfaceState::Priority(1u, current.cost()) + out.second;
+			assert(prio.enabled());
+			// found a complete solution path connecting start to end?
+			if (prio.depth() == children.size()) {
+				SolutionSequence::container_type solution;
+				solution.reserve(children.size());
+				// insert incoming solutions in reverse order
+				solution.insert(solution.end(), in.first.rbegin(), in.first.rend());
+				// insert current solution
+				solution.push_back(&current);
+				// insert outgoing solutions in normal order
+				solution.insert(solution.end(), out.first.begin(), out.first.end());
+				// store solution in sorted list
+				sorted.insert(std::make_shared<SolutionSequence>(std::move(solution), prio.cost(), this));
+			}
+			if (prio.depth() > 1) {
+				// update state priorities along the whole partial solution path
+				updateStatePrios<Interface::BACKWARD>(*current.start(), prio);
+				updateStatePrios<Interface::FORWARD>(*current.end(), prio);
+			}
+		}
+	}
+	// printChildrenInterfaces(*this->pimpl(), true, *current.creator());
+}
+
 }  // namespace task_constructor
 }  // namespace moveit

@@ -103,16 +103,6 @@ protected:
 	SerialContainer(SerialContainerPrivate* impl);
 };
 
-class SerialFilterContainer : public SerialContainer
-{
-	public:
-		SerialFilterContainer(const std::string& name = "serial filter container") : SerialContainer(name) {}
-
-	private:
-		std::vector<moveit::task_constructor::SolutionSequencePtr> solutions_accumulator;
-		void onNewSolution(const SolutionBase& s) override;
-};
-
 class ParallelContainerBasePrivate;
 class ParallelContainerBase;
 /** Parallel containers allow for alternative planning stages
@@ -235,5 +225,22 @@ public:
 protected:
 	WrapperBase(WrapperBasePrivate* impl, Stage::pointer&& child = Stage::pointer());
 };
+
+class SerialFilterContainer : public SerialContainer
+{
+	public:
+		SerialFilterContainer(int64_t num_of_best_solutions_taken,
+							  const std::string& name = "serial filter container")
+			: SerialContainer(name),
+			  num_of_best_solutions_taken(num_of_best_solutions_taken) {}
+
+	private:
+		int64_t num_of_best_solutions_taken;
+		ordered<SolutionSequencePtr> sorted;
+		void compute() override;
+		void onNewSolution(const SolutionBase& s) override;
+		void dumpSolutions();
+};
+
 }  // namespace task_constructor
 }  // namespace moveit
