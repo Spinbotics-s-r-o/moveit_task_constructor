@@ -94,6 +94,12 @@ public:
 	          double timeout, robot_trajectory::RobotTrajectoryPtr& result,
 	          const moveit_msgs::msg::Constraints& path_constraints = moveit_msgs::msg::Constraints()) override;
 
+	bool plan(const planning_scene::PlanningSceneConstPtr& from, const moveit::core::LinkModel& link,
+						const Eigen::Isometry3d& offset, const EigenSTL::vector_Isometry3d& waypoints, 
+						const moveit::core::JointModelGroup* jmg, double timeout, 
+						robot_trajectory::RobotTrajectoryPtr& result,
+						const moveit_msgs::msg::Constraints& path_constraints = moveit_msgs::msg::Constraints()) override;
+
 protected:
 	std::string pipeline_name_;
 	planning_pipeline::PlanningPipelinePtr planner_;

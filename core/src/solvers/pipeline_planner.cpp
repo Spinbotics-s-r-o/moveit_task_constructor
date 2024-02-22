@@ -53,6 +53,8 @@ namespace moveit {
 namespace task_constructor {
 namespace solvers {
 
+static const auto LOGGER = rclcpp::get_logger("PipelinePlanner");
+
 struct PlannerCache
 {
 	using PlannerID = std::tuple<std::string, std::string>;
@@ -207,6 +209,15 @@ bool PipelinePlanner::plan(const planning_scene::PlanningSceneConstPtr& from, co
 	bool success = planner_->generatePlan(from, req, res);
 	result = res.trajectory;
 	return success;
+}
+
+bool PipelinePlanner::plan(const planning_scene::PlanningSceneConstPtr& from, const moveit::core::LinkModel& link,
+																		 const Eigen::Isometry3d& offset, const EigenSTL::vector_Isometry3d& waypoints, 
+																		 const moveit::core::JointModelGroup* jmg, double timeout, 
+																		 robot_trajectory::RobotTrajectoryPtr& result,
+																		 const moveit_msgs::msg::Constraints& path_constraints)  {
+	RCLCPP_ERROR(LOGGER, "Planning method for pipeline_planner not implemented !!!");																
+	return false;																		
 }
 }  // namespace solvers
 }  // namespace task_constructor

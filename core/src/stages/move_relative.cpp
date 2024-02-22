@@ -66,6 +66,7 @@ MoveRelative::MoveRelative(const std::string& name, const solvers::PlannerInterf
 	// register actual types
 	PropertySerializer<geometry_msgs::msg::TwistStamped>();
 	PropertySerializer<geometry_msgs::msg::Vector3Stamped>();
+	PropertySerializer<std::vector<geometry_msgs::msg::TwistStamped>>();
 	p.declare<double>("min_distance", -1.0, "minimum distance to move");
 	p.declare<double>("max_distance", 0.0, "maximum distance to move");
 
@@ -206,11 +207,13 @@ bool MoveRelative::compute(const InterfaceState& state, planning_scene::Planning
 		if (!utils::getRobotTipForFrame(props.property("ik_frame"), *scene, jmg, solution, link, ik_pose_world))
 			return false;
 
+		bool multiple_waypoints = false;
 		bool use_rotation_distance = false;  // measure achieved distance as rotation?
 		Eigen::Vector3d linear;  // linear translation
 		Eigen::Vector3d angular;  // angular rotation
 		double linear_norm = 0.0, angular_norm = 0.0;
 		Eigen::Isometry3d target_eigen;
+		EigenSTL::vector_Isometry3d waypoints; 
 
 		try {  // try to extract Twist
 			const geometry_msgs::msg::TwistStamped& target = boost::any_cast<geometry_msgs::msg::TwistStamped>(direction);
@@ -275,6 +278,50 @@ bool MoveRelative::compute(const InterfaceState& state, planning_scene::Planning
 			// compute target transform for ik_frame applying delta transform of twist
 			linear = frame_pose.linear() * linear;
 			target_eigen = Eigen::Translation3d(linear) * ik_pose_world;
+			goto COMPUTE;
+		} catch (const boost::bad_any_cast&) { /* continue with Twist Vector */
+		}
+
+		try {  // try to extract Twist vector
+			const std::vector<geometry_msgs::msg::TwistStamped>& targets = boost::any_cast<std::vector<geometry_msgs::msg::TwistStamped>>(direction);
+			multiple_waypoints = true;
+			for(auto target : targets)
+			{
+				tf2::fromMsg(target.twist.linear, linear);
+				tf2::fromMsg(target.twist.angular, angular);
+
+				linear_norm = linear.norm();
+				angular_norm = angular.norm();
+				if (angular_norm > std::numeric_limits<double>::epsilon())
+					angular /= angular_norm;  // normalize angular
+				use_rotation_distance = linear_norm < std::numeric_limits<double>::epsilon();
+
+				// use max distance?
+				if (max_distance > 0.0) {
+					double scale = 1.0;
+					if (!use_rotation_distance)  // non-zero linear motion defines distance
+						scale = max_distance / linear_norm;
+					else if (angular_norm > std::numeric_limits<double>::epsilon())
+						scale = max_distance / angular_norm;
+					else
+						assert(false);
+					linear *= scale;
+					linear_norm *= scale;
+					angular_norm *= scale;
+				}
+
+				// invert direction?
+				if (dir == Interface::BACKWARD) {
+					linear *= -1.0;
+					angular *= -1.0;
+				}
+
+				Eigen::Matrix3d rotation_matrix = Eigen::AngleAxisd(angular.norm(), angular.normalized()).toRotationMatrix();
+				target_eigen = Eigen::Isometry3d::Identity();
+				target_eigen.rotate(rotation_matrix);
+				target_eigen.translate(linear);
+				waypoints.push_back(target_eigen);
+			}
 		} catch (const boost::bad_any_cast&) {
 			solution.markAsFailure(std::string("invalid direction type: ") + direction.type().name());
 			return false;
@@ -284,8 +331,10 @@ bool MoveRelative::compute(const InterfaceState& state, planning_scene::Planning
 		// offset from link to ik_frame
 		const Eigen::Isometry3d& offset = scene->getCurrentState().getGlobalLinkTransform(link).inverse() * ik_pose_world;
 
-		success =
-		    planner_->plan(state.scene(), *link, offset, target_eigen, jmg, timeout, robot_trajectory, path_constraints);
+		if(!multiple_waypoints)
+			success = planner_->plan(state.scene(), *link, offset, target_eigen, jmg, timeout, robot_trajectory, path_constraints);
+		else
+			success = planner_->plan(state.scene(), *link, offset, waypoints, jmg, timeout, robot_trajectory, path_constraints);
 
 		moveit::core::RobotStatePtr& reached_state = robot_trajectory->getLastWayPointPtr();
 		reached_state->updateLinkTransforms();

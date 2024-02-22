@@ -133,6 +133,15 @@ bool JointInterpolationPlanner::plan(const planning_scene::PlanningSceneConstPtr
 
 	return plan(from, to, jmg, timeout, result, path_constraints);
 }
+
+bool JointInterpolationPlanner::plan(const planning_scene::PlanningSceneConstPtr& from, const moveit::core::LinkModel& link,
+																		 const Eigen::Isometry3d& offset, const EigenSTL::vector_Isometry3d& waypoints, 
+																		 const moveit::core::JointModelGroup* jmg, double timeout, 
+																		 robot_trajectory::RobotTrajectoryPtr& result,
+																		 const moveit_msgs::msg::Constraints& path_constraints)  {																																		
+	RCLCPP_ERROR(LOGGER, "Planning method for joint_interpolation planner not implemented !!!");
+	return false;																		
+}
 }  // namespace solvers
 }  // namespace task_constructor
 }  // namespace moveit

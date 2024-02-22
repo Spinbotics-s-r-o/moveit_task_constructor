@@ -88,6 +88,7 @@ public:
 
 	/// perform twist motion on specified link
 	void setDirection(const geometry_msgs::msg::TwistStamped& twist) { setProperty("direction", twist); }
+	void setDirection(const std::vector<geometry_msgs::msg::TwistStamped>& twists) { setProperty("direction", twists); }
 	/// translate link along given direction
 	void setDirection(const geometry_msgs::msg::Vector3Stamped& direction) { setProperty("direction", direction); }
 	/// move specified joint variables by given amount

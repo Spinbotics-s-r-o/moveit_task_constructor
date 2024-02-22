@@ -41,7 +41,8 @@
 #include <moveit/macros/class_forward.h>
 #include <moveit_msgs/msg/constraints.hpp>
 #include <moveit/task_constructor/properties.h>
-#include <Eigen/Geometry>
+#include <eigen_stl_containers/eigen_stl_containers.h>
+#include <eigen_stl_containers/eigen_stl_vector_container.h>
 
 namespace planning_scene {
 MOVEIT_CLASS_FORWARD(PlanningScene);
@@ -89,6 +90,13 @@ public:
 	                  const Eigen::Isometry3d& offset, const Eigen::Isometry3d& target,
 	                  const moveit::core::JointModelGroup* jmg, double timeout,
 	                  robot_trajectory::RobotTrajectoryPtr& result,
+	                  const moveit_msgs::msg::Constraints& path_constraints = moveit_msgs::msg::Constraints()) = 0;
+
+	/// plan trajectory from current robot state trough waypoints using cartesian motion
+	virtual bool plan(const planning_scene::PlanningSceneConstPtr& from, const moveit::core::LinkModel& link,
+	                  const Eigen::Isometry3d& offset, const EigenSTL::vector_Isometry3d& waypoints, 
+										const moveit::core::JointModelGroup* jmg, double timeout, 
+										robot_trajectory::RobotTrajectoryPtr& result,
 	                  const moveit_msgs::msg::Constraints& path_constraints = moveit_msgs::msg::Constraints()) = 0;
 };
 }  // namespace solvers
