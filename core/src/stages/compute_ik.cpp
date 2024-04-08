@@ -417,8 +417,10 @@ void ComputeIK::compute() {
     bool has_region_centers = false;
     for (const auto &joint_model: joint_models) {
       if (joint_model->getType() != moveit::core::JointModel::JointType::REVOLUTE) {
-        for (auto &var: joint_model->getVariableNames())
+        for (auto &var: joint_model->getVariableNames()) {
+          variable_bounds.push_back(joint_model->getVariableBounds(var));
           angular_region_centers.push_back(std::numeric_limits<double>::infinity());
+        }
         continue;
       }
       for (auto &var: joint_model->getVariableNames()) {
@@ -477,7 +479,6 @@ void ComputeIK::compute() {
             continue;
           double &pos = solution.joint_positions[i];
 
-          RCLCPP_INFO(LOGGER, "IK position: %lf", pos);
           pos -= round((pos - angular_region_centers[i])/(2*M_PI))*(2*M_PI);
           const auto &bounds = variable_bounds[i];
           if (bounds.position_bounded_) {
@@ -487,7 +488,6 @@ void ComputeIK::compute() {
               pos -= 2*M_PI;
             pos = std::max(bounds.min_position_, std::min(bounds.max_position_, pos));  // fix minor computation errors
           }
-          RCLCPP_INFO(LOGGER, "Adjusted position: %lf", pos);
         }
       }
       valid_solutions_count++;
